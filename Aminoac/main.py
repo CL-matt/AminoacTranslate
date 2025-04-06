@@ -50,6 +50,7 @@ from pypinyin import pinyin, Style
 import pyperclip
 import json
 import os
+import jieba
 from threading import Thread
 import pdfplumber
 import unicodedata
@@ -66,6 +67,7 @@ COLOR_SCHEME = {
 }
 
 # 全局配置
+# jieba.enable_parallel(4) #使用4核，支持长文本
 HISTORY_DIR = "./output"
 HISTORY_FILE = os.path.join(HISTORY_DIR, "translation_history.json")  # 使用路径拼接
 MAX_HISTORY = 20
@@ -91,6 +93,24 @@ TONE_STYLES = [
 ]
 
 def clean_pinyin(pinyin_str, style):
+    """根据模式清洗拼音（修改空格处理）"""
+    if style.pypinyin_style == Style.NORMAL:
+        cleaned = []
+        for char in pinyin_str:
+            # 保留空格
+            if char == ' ':
+                cleaned.append(char)
+                continue
+            # 处理声调符号
+            normalized = unicodedata.normalize('NFD', char)
+            for c in normalized:
+                if not unicodedata.combining(c):
+                    cleaned.append(c)
+        return ''.join(cleaned).lower().replace("ü", "v")
+    else:
+        return pinyin_str
+
+# def clean_pinyin(pinyin_str, style):
     """根据模式清洗拼音"""
     if style.pypinyin_style == Style.NORMAL:
         normalized = unicodedata.normalize('NFD', pinyin_str)
@@ -100,6 +120,29 @@ def clean_pinyin(pinyin_str, style):
         return pinyin_str
 
 def reverse_pinyin_translation(chinese_text, tone_style):
+    """核心翻译函数"""
+    try:
+        # ==== 新增分词逻辑 ====
+        words = jieba.lcut(chinese_text)
+        pinyin_parts = []
+        for word in words:
+            chars_pinyin = pinyin(word, style=tone_style.pypinyin_style)
+            combined = ''.join([p[0] for p in chars_pinyin])
+            pinyin_parts.append(combined)
+        pinyin_str = ' '.join(pinyin_parts)
+
+        # =========根据模式清洗==========
+        processed = clean_pinyin(pinyin_str, tone_style)
+
+        # =========反转==========
+        reversed_str = processed[::-1]
+        formatted = reversed_str[0].upper() + reversed_str[1:] if reversed_str else ""
+        return formatted
+    
+    except Exception as e:
+        raise ValueError(f"转换错误: {str(e)}")
+    
+# def reverse_pinyin_translation(chinese_text, tone_style):
     """核心翻译函数"""
     try:
         # 提取拼音
@@ -318,7 +361,10 @@ if __name__ == "__main__":
     # 单元测试
     test_cases = [
         ("你好", TONE_STYLES[2], "Oahin"),  # 无声调模式
-        ("测试", TONE_STYLES[0], "Ìhsèc")    # 带声调模式
+        ("测试", TONE_STYLES[0], "Ìhsèc"),  # 带声调模式
+        ("你好世界", TONE_STYLES[2], "Eijihs oahin"),     # 分词后带空格
+        ("北京大学", TONE_STYLES[1], "2eux4adgn1iji3eb"), #有点问题，没办法保留空格 
+        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")        # 保留声调
     ]
     for text, style, expected in test_cases:
         result = reverse_pinyin_translation(text, style)
