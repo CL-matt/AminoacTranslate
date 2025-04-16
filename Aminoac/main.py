@@ -47,7 +47,7 @@ __email__ = "@gmail.com"
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 from pypinyin import pinyin, Style
-import pyperclip
+import pyperclip #安装出了问题，导致无法复制，有时间再修
 import json
 import os
 import jieba
@@ -68,15 +68,20 @@ COLOR_SCHEME = {
 
 # 全局配置
 # jieba.enable_parallel(4) #使用4核，支持长文本
-HISTORY_DIR = "./output"
+HISTORY_DIR = "./AminoacTrac1/output" #获取相对路径
+#自动创建导出历史记录文件夹
+if not os.path.exists(HISTORY_DIR):
+    os.makedirs(HISTORY_DIR)
+
 HISTORY_FILE = os.path.join(HISTORY_DIR, "translation_history.json")  # 使用路径拼接
+# print(HISTORY_FILE) 测试
 MAX_HISTORY = 20
 FILE_TYPES = [
     ('PDF 文档', '*.pdf'), 
     ('文本文档', '*.txt'),
     ('所有文件', '*.*')
 ]
-HISTORY_COLUMNS = ("时间", "输入摘要", "输出摘要", "模式") #历史记录没写完，有时间添加
+HISTORY_COLUMNS = ("时间", "输入摘要", "输出摘要", "模式") # 已完善
 
 # 拼音风格管理类
 class ToneStyle:
@@ -84,6 +89,14 @@ class ToneStyle:
         self.name = name
         self.pypinyin_style = pypinyin_style
         self.description = description
+
+# 历史记录
+class HistoryRecord:
+    def __init__(self, input: str, output: str, style: ToneStyle):
+        self.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.input = input[:30]
+        self.output = output[:30]
+        self.style = style.name
 
 # 预定义拼音风格列表
 TONE_STYLES = [
@@ -247,7 +260,7 @@ class TranslationApp:
         self.root.geometry("900x650")
         self.style_var = tk.StringVar(value=TONE_STYLES[0].name)  # 默认风格
         self.setup_ui()
-        load_history()
+        self.history_records = load_history()
 
     def setup_ui(self):
         """初始化用户界面"""
@@ -306,6 +319,10 @@ class TranslationApp:
         ttk.Button(btn_frame,
                  text="复制结果",
                  command=self.copy_result).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(btn_frame,
+                 text="查看历史",
+                 command=self.show_history).pack(side=tk.LEFT, padx=5)
 
         # 输出区域
         output_label = ttk.Label(main_frame, text="翻译结果：")
@@ -344,7 +361,11 @@ class TranslationApp:
             self.output_area.delete("1.0", tk.END)
             self.output_area.insert(tk.END, translated)
             self.output_area.config(state='disabled')
-            
+            self.history_records.insert(0, HistoryRecord(input_text, translated, current_style))
+            if len(self.history_records) > MAX_HISTORY:
+                self.history_records = self.history_records[:MAX_HISTORY]
+            save_history(self.history_records)
+
         except Exception as e:
             messagebox.showerror("错误", f"翻译失败: {str(e)}")
 
@@ -357,14 +378,38 @@ class TranslationApp:
         except Exception as e:
             messagebox.showerror("复制失败", f"无法复制内容: {str(e)}")
 
+    def show_history(self):
+        history_win = tk.Toplevel(self.root)
+        history_win.title("历史记录")
+        history_win.geometry("600x300")
+    
+        tree = ttk.Treeview(history_win, columns=HISTORY_COLUMNS, show="headings")
+        for col in HISTORY_COLUMNS:
+            tree.heading(col, text=col)
+            tree.column(col, anchor="w", width=150)
+        tree.pack(fill=tk.BOTH, expand=True)
+
+        for record in self.history_records:
+            tree.insert("", tk.END, values=(record.timestamp, record.input, record.output, record.style))
+
+        def on_double_click(event):
+            selected = tree.focus()
+            if selected:
+                values = tree.item(selected, "values")
+                if values:
+                    pyperclip.copy(values[2])
+                    messagebox.showinfo("已复制", "输出已复制到剪贴板")
+
+        tree.bind("<Double-1>", on_double_click)
+
 if __name__ == "__main__":
     # 单元测试
     test_cases = [
         ("你好", TONE_STYLES[2], "Oahin"),  # 无声调模式
         ("测试", TONE_STYLES[0], "Ìhsèc"),  # 带声调模式
         ("你好世界", TONE_STYLES[2], "Eijihs oahin"),     # 分词后带空格
-        ("北京大学", TONE_STYLES[1], "2eux4adgn1iji3eb"), #有点问题，没办法保留空格 
-        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")        # 保留声调
+        ("北京大学", TONE_STYLES[1], "2eux4adgn1iji3eb"), # 有点问题，没办法保留空格
+        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")   # 保留声调
     ]
     for text, style, expected in test_cases:
         result = reverse_pinyin_translation(text, style)
@@ -377,4 +422,4 @@ if __name__ == "__main__":
     try:
         root.mainloop()
     finally:
-        save_history()
+        save_history(app.history_records)
