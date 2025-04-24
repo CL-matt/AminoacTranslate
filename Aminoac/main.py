@@ -8,7 +8,7 @@ __license__ = None
 __version__ = "Alpha 1.2"
 __email__ = "@gmail.com"
 
-"""别点开
+"""
 核心依赖模块
 
 包含程序运行所需的所有第三方库和标准库导入
@@ -68,7 +68,7 @@ COLOR_SCHEME = {
 
 # 全局配置
 # jieba.enable_parallel(4) #使用4核，支持长文本
-HISTORY_DIR = "./AminoacTrac1/output" #获取相对路径
+HISTORY_DIR = "output" #获取相对路径
 #自动创建导出历史记录文件夹
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
@@ -105,6 +105,18 @@ TONE_STYLES = [
     ToneStyle("无声调", Style.NORMAL, "移除所有声调符号，如 ni")
 ]
 
+def load_custom_dict(file_path="Aminoac/custom_dict.json"):
+    """加载自定义翻译字典"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            return {}
+    except Exception as e:
+        print(f"加载自定义字典失败: {str(e)}")
+        return {}
+
 def clean_pinyin(pinyin_str, style):
     """根据模式清洗拼音（修改空格处理）"""
     if style.pypinyin_style == Style.NORMAL:
@@ -123,25 +135,26 @@ def clean_pinyin(pinyin_str, style):
     else:
         return pinyin_str
 
-# def clean_pinyin(pinyin_str, style):
-    """根据模式清洗拼音"""
-    if style.pypinyin_style == Style.NORMAL:
-        normalized = unicodedata.normalize('NFD', pinyin_str)
-        cleaned = ''.join([c for c in normalized if not unicodedata.combining(c)])
-        return cleaned.lower().replace(" ", "").replace("ü", "v")
-    else:
-        return pinyin_str
+CUSTOM_TRANSLATION_DICT = load_custom_dict()
 
 def reverse_pinyin_translation(chinese_text, tone_style):
     """核心翻译函数"""
     try:
+        # ==== Check Custom Dictionary ====
+        if chinese_text in CUSTOM_TRANSLATION_DICT:
+            return CUSTOM_TRANSLATION_DICT[chinese_text]
+
         # ==== 新增分词逻辑 ====
         words = jieba.lcut(chinese_text)
         pinyin_parts = []
         for word in words:
-            chars_pinyin = pinyin(word, style=tone_style.pypinyin_style)
-            combined = ''.join([p[0] for p in chars_pinyin])
-            pinyin_parts.append(combined)
+            # Check each word in the custom dictionary
+            if word in CUSTOM_TRANSLATION_DICT:
+                pinyin_parts.append(CUSTOM_TRANSLATION_DICT[word])
+            else:
+                chars_pinyin = pinyin(word, style=tone_style.pypinyin_style)
+                combined = ''.join([p[0] for p in chars_pinyin])
+                pinyin_parts.append(combined)
         pinyin_str = ' '.join(pinyin_parts)
 
         # =========根据模式清洗==========
@@ -151,24 +164,7 @@ def reverse_pinyin_translation(chinese_text, tone_style):
         reversed_str = processed[::-1]
         formatted = reversed_str[0].upper() + reversed_str[1:] if reversed_str else ""
         return formatted
-    
-    except Exception as e:
-        raise ValueError(f"转换错误: {str(e)}")
-    
-# def reverse_pinyin_translation(chinese_text, tone_style):
-    """核心翻译函数"""
-    try:
-        # 提取拼音
-        raw_pinyin = [item[0] for item in pinyin(chinese_text, style=tone_style.pypinyin_style)]
-        pinyin_str = "".join(raw_pinyin)
-        
-        # 根据模式清洗
-        processed = clean_pinyin(pinyin_str, tone_style)
-        
-        # 反转并格式化
-        reversed_str = processed[::-1]
-        formatted = reversed_str[0].upper() + reversed_str[1:] if reversed_str else ""
-        return formatted
+
     except Exception as e:
         raise ValueError(f"转换错误: {str(e)}")
 
@@ -181,6 +177,18 @@ def read_pdf(file_path):
             if text:
                 content.extend(text.split('\n'))
     return [line.strip() for line in content if line.strip()]
+
+def load_custom_dict(file_path="custom_dict.json"):
+    """加载自定义翻译字典"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            return {}
+    except Exception as e:
+        print(f"加载自定义字典失败: {str(e)}")
+        return {}
 
 def process_file_translation(tone_style):
     """文件翻译处理"""
