@@ -55,6 +55,11 @@ from threading import Thread
 import pdfplumber
 import unicodedata
 from datetime import datetime
+import pyttsx3
+from pydub import AudioSegment  # 音频处理库
+from pydub.playback import play
+import io
+import threading
 
 # 配色方案
 COLOR_SCHEME = {
@@ -69,11 +74,13 @@ COLOR_SCHEME = {
 # 全局配置
 # jieba.enable_parallel(4) #使用4核，支持长文本
 HISTORY_DIR = "output" #获取相对路径
+
 #自动创建导出历史记录文件夹
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 
 HISTORY_FILE = os.path.join(HISTORY_DIR, "translation_history.json")  # 使用路径拼接
+TEMP_AUDIO = os.path.join(HISTORY_DIR, "temp_audio.wav")  # 临时音频文件路径
 # print(HISTORY_FILE) 测试
 MAX_HISTORY = 20
 FILE_TYPES = [
@@ -269,6 +276,8 @@ class TranslationApp:
         self.style_var = tk.StringVar(value=TONE_STYLES[0].name)  # 默认风格
         self.setup_ui()
         self.history_records = load_history()
+        self.audio_lock = threading.Lock()  # 音频操作锁
+        self.engine = self.init_tts_engine()
 
     def setup_ui(self):
         """初始化用户界面"""
@@ -331,6 +340,9 @@ class TranslationApp:
         ttk.Button(btn_frame,
                  text="查看历史",
                  command=self.show_history).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame,
+             text="朗读阿语",
+             command=self.speak_aminoac).pack(side=tk.LEFT, padx=5)
 
         # 输出区域
         output_label = ttk.Label(main_frame, text="翻译结果：")
@@ -409,6 +421,56 @@ class TranslationApp:
                     messagebox.showinfo("已复制", "输出已复制到剪贴板")
 
         tree.bind("<Double-1>", on_double_click)
+
+    def init_tts_engine(self):
+        """初始化支持中文的TTS引擎"""
+        try:
+            engine = pyttsx3.init()
+            # 寻找中文语音包（Windows系统）
+            for voice in engine.getProperty('voices'):
+                if 'Chinese' in voice.name:
+                    engine.setProperty('voice', voice.id)
+                    engine.setProperty('rate', 160)  # 优化语速
+                    return engine
+            messagebox.showwarning("警告", "未找到中文语音引擎")
+            return None
+        except Exception as e:
+            messagebox.showerror("错误", f"语音引擎初始化失败：{str(e)}")
+            return None
+
+    def speak_aminoac(self):
+        """朗读倒放的阿米诺斯语"""
+        if not self.engine:
+            return
+            
+        # 获取原始中文文本
+        input_text = self.input_area.get("1.0", tk.END).strip()
+        if not input_text:
+            messagebox.showinfo("提示", "没有可朗读的内容")
+            return
+
+        def _speak_thread():
+            try:
+                with self.audio_lock:
+                    # 生成原始中文语音
+                    self.engine.save_to_file(input_text, TEMP_AUDIO)
+                    self.engine.runAndWait()
+                    
+                    # 加载并倒放音频
+                    audio = AudioSegment.from_wav(TEMP_AUDIO)
+                    reversed_audio = audio.reverse()
+                    
+                    # 播放倒放音频
+                    play(reversed_audio)
+                    
+            except Exception as e:
+                messagebox.showerror("错误", f"朗读失败：{str(e)}")
+            finally:
+                if os.path.exists(TEMP_AUDIO):
+                    os.remove(TEMP_AUDIO)
+
+        threading.Thread(target=_speak_thread, daemon=True).start()
+
 
 if __name__ == "__main__":
     # 单元测试
