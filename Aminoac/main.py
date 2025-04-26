@@ -25,6 +25,10 @@ __email__ = "@gmail.com"
    - pypinyin: 汉字转拼音核心库
      - pinyin: 汉字转拼音函数
      - Style: 拼音风格枚举（声调/数字/无调）
+   - pyttsx3: 语音核心库
+     - pydub: 音频处理库
+     - playsound: 播放音频文件
+     - AudioSegment: 音频段处理类
 
 3. 系统交互：
    - pyperclip: 剪贴板读写操作
