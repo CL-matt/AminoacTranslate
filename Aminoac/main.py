@@ -43,13 +43,17 @@ __email__ = "@gmail.com"
 7. 时间处理：
    - datetime: 记录翻译操作时间戳
 """
+import os
+import sys
+base_dir = os.path.dirname(os.path.abspath(__file__))
+libs_path = os.path.join(base_dir, "libs")
+sys.path.insert(0, libs_path)
 
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 from pypinyin import pinyin, Style
 import pyperclip #安装出了问题，导致无法复制，有时间再修
 import json
-import os
 import jieba
 from threading import Thread
 import pdfplumber
@@ -60,6 +64,8 @@ from pydub import AudioSegment  # 音频处理库
 from pydub.playback import play
 import io
 import threading
+import time
+from playsound import playsound
 
 # 配色方案
 COLOR_SCHEME = {
@@ -72,14 +78,13 @@ COLOR_SCHEME = {
 }
 
 # 全局配置
-# jieba.enable_parallel(4) #使用4核，支持长文本
-HISTORY_DIR = "output" #获取相对路径
+HISTORY_DIR = "output"  # 将缓存文件存储在 output 文件夹下
 
-#自动创建导出历史记录文件夹
+# 自动创建导出历史记录文件夹
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 
-HISTORY_FILE = os.path.join(HISTORY_DIR, "translation_history.json")  # 使用路径拼接
+HISTORY_FILE = os.path.join(HISTORY_DIR, "translation_history.json")  # 历史记录文件路径
 TEMP_AUDIO = os.path.join(HISTORY_DIR, "temp_audio.wav")  # 临时音频文件路径
 # print(HISTORY_FILE) 测试
 MAX_HISTORY = 20
@@ -112,18 +117,6 @@ TONE_STYLES = [
     ToneStyle("无声调", Style.NORMAL, "移除所有声调符号，如 ni")
 ]
 
-def load_custom_dict(file_path="Aminoac/custom_dict.json"):
-    """加载自定义翻译字典"""
-    try:
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        else:
-            return {}
-    except Exception as e:
-        print(f"加载自定义字典失败: {str(e)}")
-        return {}
-
 def clean_pinyin(pinyin_str, style):
     """根据模式清洗拼音（修改空格处理）"""
     if style.pypinyin_style == Style.NORMAL:
@@ -141,8 +134,6 @@ def clean_pinyin(pinyin_str, style):
         return ''.join(cleaned).lower().replace("ü", "v")
     else:
         return pinyin_str
-
-CUSTOM_TRANSLATION_DICT = load_custom_dict()
 
 def reverse_pinyin_translation(chinese_text, tone_style):
     """核心翻译函数"""
@@ -196,7 +187,8 @@ def load_custom_dict(file_path="custom_dict.json"):
     except Exception as e:
         print(f"加载自定义字典失败: {str(e)}")
         return {}
-
+    
+CUSTOM_TRANSLATION_DICT = load_custom_dict()
 def process_file_translation(tone_style):
     """文件翻译处理"""
     try:
@@ -341,7 +333,7 @@ class TranslationApp:
                  text="查看历史",
                  command=self.show_history).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame,
-             text="朗读阿语",
+             text="朗读",
              command=self.speak_aminoac).pack(side=tk.LEFT, padx=5)
 
         # 输出区域
@@ -442,7 +434,7 @@ class TranslationApp:
         """朗读倒放的阿米诺斯语"""
         if not self.engine:
             return
-            
+
         # 获取原始中文文本
         input_text = self.input_area.get("1.0", tk.END).strip()
         if not input_text:
@@ -453,21 +445,47 @@ class TranslationApp:
             try:
                 with self.audio_lock:
                     # 生成原始中文语音
+                    print("生成语音文件...")
                     self.engine.save_to_file(input_text, TEMP_AUDIO)
                     self.engine.runAndWait()
-                    
+                    time.sleep(0.1)  # 确保文件句柄释放
+
+                    # 确保文件生成完成后再加载
+                    if not os.path.exists(TEMP_AUDIO):
+                        raise FileNotFoundError("音频文件未生成")
+                    if not os.access(TEMP_AUDIO, os.R_OK):
+                        raise PermissionError(f"无法读取文件：{TEMP_AUDIO}")
+
+                    print(f"TEMP_AUDIO 路径: {TEMP_AUDIO}")
+                    print(f"文件是否存在: {os.path.exists(TEMP_AUDIO)}")
+                    print(f"文件是否可读: {os.access(TEMP_AUDIO, os.R_OK)}")
+                    print(f"文件是否可写: {os.access(TEMP_AUDIO, os.W_OK)}")
+
                     # 加载并倒放音频
                     audio = AudioSegment.from_wav(TEMP_AUDIO)
                     reversed_audio = audio.reverse()
-                    
+                    print("倒放音频...")
+
+                    # 保存倒放后的音频
+                    reversed_audio_path = os.path.join(HISTORY_DIR, "reversed_audio.wav")
+                    reversed_audio.export(reversed_audio_path, format="wav", codec="pcm_s16le")
+                    print(f"倒放音频已保存到: {reversed_audio_path}")
+
                     # 播放倒放音频
-                    play(reversed_audio)
-                    
+                    print("准备播放倒放音频...")
+                    from playsound import playsound
+                    playsound(reversed_audio_path)
+                    print("播放完成")
+
             except Exception as e:
                 messagebox.showerror("错误", f"朗读失败：{str(e)}")
-            finally:
-                if os.path.exists(TEMP_AUDIO):
-                    os.remove(TEMP_AUDIO)
+            #finally:
+                # 如果不需要删除临时文件，可以注释掉以下代码
+                # if os.path.exists(TEMP_AUDIO):
+                #     try:
+                #         os.remove(TEMP_AUDIO)
+                #     except Exception as e:
+                #         print(f"无法删除临时文件: {str(e)}")
 
         threading.Thread(target=_speak_thread, daemon=True).start()
 
