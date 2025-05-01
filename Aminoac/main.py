@@ -5,7 +5,7 @@
 __author__ = "温茶"
 __copyright__ = "Copyright (C) 2025, ranrylios"
 __license__ = None
-__version__ = "Alpha 1.2"
+__version__ = "Alpha 1.7"
 __email__ = "@gmail.com"
 
 """
@@ -177,79 +177,6 @@ def reverse_pinyin_translation(chinese_text, tone_style):
 
     # 整体首字母大写
     return out[0].upper() + out[1:] if out else ""
-    
-def wtranslate_with_punctuation(text: str, tone_style) -> str:
-    _PUNCT_RE = re.compile(r'([，。！？；："＂＇＇＇""''‘’"“”()（）【】\{\}\[\]〈〉《》﹏…—,.!?;:\-\s])')
-    """
-    分阶段处理：
-    1. 中文→拼音（保持词序）
-    2. 反转每个词的拼音字母
-    3. 反转句子顺序+首字母大写
-    """
-    # 阶段一：中文→拼音（保持词序）
-    def to_pinyin(s: str) -> str:
-        words = list(jieba.cut(s))
-        pinyin_words = []
-        for word in words:
-            if _PUNCT_RE.fullmatch(word):  # 标点符号原样保留
-                pinyin_words.append(word)
-            else:
-                pys = pinyin(word, style=tone_style.pypinyin_style)
-                pinyin_words.append(''.join([p[0] for p in pys]))
-        return ' '.join(pinyin_words)  # 保留空格
-
-    # 阶段二：反转拼音字母
-    def reverse_pinyin(s: str) -> str:
-        segments = _PUNCT_RE.split(s)
-        result = []
-        for seg in segments:
-            if not seg:
-                continue
-            if _PUNCT_RE.fullmatch(seg):  # 标点符号原样保留
-                result.append(seg)
-            else:
-                result.append(seg[::-1])  # 反转字母
-        return ''.join(result)
-
-    # 阶段三：反转句子顺序+首字母大写
-    sentences = re.split(r'([，。！？；,.!?])', text)  # 按标点符号分割
-    processed = []
-    current = []
-    
-    for seg in sentences:
-        if not seg.strip():
-            continue
-        if re.fullmatch(r'[，。！？；,.!?]', seg):  # 标点符号
-            if current:
-                content = ''.join(current)
-                # 阶段一和阶段二处理
-                pinyin_content = to_pinyin(content)
-                reversed_content = reverse_pinyin(pinyin_content)
-                processed.append((reversed_content, seg))
-                current = []
-        else:
-            current.append(seg)
-    
-    if current:
-        content = ''.join(current)
-        pinyin_content = to_pinyin(content)
-        reversed_content = reverse_pinyin(pinyin_content)
-        processed.append((reversed_content, ''))
-
-    # 反转句子顺序
-    reversed_sentences = processed[::-1]
-    
-    # 首字母大写
-    if reversed_sentences:
-        first_content, first_punct = reversed_sentences[0]
-        if first_content:
-            for i, c in enumerate(first_content):
-                if c.isalpha():
-                    first_content = first_content[:i] + c.upper() + first_content[i+1:]
-                    break
-        reversed_sentences[0] = (first_content, first_punct)
-    
-    return ''.join([content + punct for content, punct in reversed_sentences])
 
 def translate_with_punctuation(text: str, tone_style) -> str:
     """
