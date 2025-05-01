@@ -5,7 +5,7 @@
 __author__ = "温茶"
 __copyright__ = "Copyright (C) 2025, ranrylios"
 __license__ = None
-__version__ = "Alpha 1.7"
+__version__ = "Alpha 2.0"
 __email__ = "@gmail.com"
 
 """
@@ -181,67 +181,115 @@ def reverse_pinyin_translation(chinese_text, tone_style):
 def translate_with_punctuation(text: str, tone_style) -> str:
     """
     严格按照要求的新实现：
-    1. 先提取句子框架（保留原标点）
+    1. 重新定义句子（以语义完整性为单位）
     2. 每句内部分词并反转拼音
     3. 反转句子顺序
     4. 添加空格并首字母大写
     """
-    # 第一步：提取句子框架（句子和标点符号分离）
-    sentences = []
-    delimiters = []
-    
-    # 用正则匹配中文标点分割
-    pattern = re.compile(r'([，。！？；,.!?])')
-    parts = pattern.split(text)
-    
-    current_sent = []
-    for part in parts:
-        if not part.strip():
-            continue
-        if pattern.fullmatch(part):  # 是标点符号
-            if current_sent:
-                sentences.append(''.join(current_sent))
-                current_sent = []
-            delimiters.append(part)
-        else:  # 是句子内容
-            current_sent.append(part)
-    
-    if current_sent:
-        sentences.append(''.join(current_sent))
+    print(f"原始文本: {text}")
+
+    # 第一步：分割句子（以语义完整性为单位）
+    pattern = re.compile(r'([^。！？!?]*[。！？!?])')  # 匹配完整句子，包括标点符号
+    matches = pattern.findall(text)
+    sentences = [match.strip() for match in matches if match.strip()]
+    print(f"分割的句子: {sentences}")
     
     # 第二步：处理每个句子（分词→拼音→反转）
-    reversed_sents = []
-    for sent in sentences:
-        words = list(jieba.cut(sent))
+    processed_sentences = []
+    for sentence in sentences:
+        print(f"处理句子: {sentence}")
+        # 去掉句尾标点符号，单独保存
+        content = sentence[:-1]
+        delimiter = sentence[-1]
+        
+        words = list(jieba.cut(content))
+        print(f"分词结果: {words}")
         reversed_words = []
         for word in words:
             # 中文转拼音
             pys = pinyin(word, style=tone_style.pypinyin_style)
             py_str = ''.join([p[0] for p in pys])
+            print(f"拼音: {py_str}")
             # 清洗拼音
             cleaned = clean_pinyin(py_str, tone_style)
+            print(f"清洗后的拼音: {cleaned}")
             # 反转拼音
             reversed_word = cleaned[::-1]
+            print(f"反转后的拼音: {reversed_word}")
             reversed_words.append(reversed_word)
-        reversed_sents.append(' '.join(reversed_words))  # 词间加空格
+        # 反转句子内部的词语顺序
+        reversed_sentence = ''.join(
+            word if re.match(r'[，。！？!?.,\s]', word) else f' {word}'
+            for word in reversed_words[::-1]
+        ).strip()
+        print(f"处理后的句子（反转词语顺序）: {reversed_sentence}")
+        # 添加标点符号
+        processed_sentences.append(reversed_sentence + delimiter)
     
-    # 第三步：反转句子顺序并组合
-    reversed_sents = reversed_sents[::-1]
-    final_parts = []
-    for i, sent in enumerate(reversed_sents):
-        final_parts.append(sent)
-        if i < len(delimiters):
-            final_parts.append(delimiters[len(delimiters) - i - 1])  # 反转标点符号顺序
+    print(f"所有处理后的句子: {processed_sentences}")
+    
+    # 第三步：反转句子顺序
+    processed_sentences = processed_sentences[::-1]
+    print(f"反转后的句子顺序: {processed_sentences}")
     
     # 第四步：首字母大写
-    result = ''.join(final_parts).strip()
+    result = ' '.join(processed_sentences).strip()
     if result:
-        for i, c in enumerate(result):
-            if c.isalpha():
-                result = result[:i] + c.upper() + result[i+1:]
-                break
+        result_chars = list(result)
+        capitalize_next = True  # 标记是否需要大写
+        for i, c in enumerate(result_chars):
+            if c.isalpha() and capitalize_next:
+                result_chars[i] = c.upper()
+                capitalize_next = False
+            elif c in ['。', '.', '！', '？']:  # 遇到句号等标点符号时，标记下一个字母需要大写
+                capitalize_next = True
+        result = ''.join(result_chars)
     
+    print(f"最终结果: {result}")
     return result
+
+def translate_paragraphs(text: str, tone_style) -> str:
+    """
+    处理多段文字的作文，每段独立处理。
+    """
+    print(f"原始文本: {text}")
+
+    # 按段落分割
+    paragraphs = text.split('\n')
+    print(f"分割的段落: {paragraphs}")
+
+    # 处理每段文字
+    translated_paragraphs = []
+    for paragraph in paragraphs:
+        if paragraph.strip():  # 跳过空段落
+            translated_paragraph = translate_with_punctuation(paragraph.strip(), tone_style)
+            translated_paragraphs.append(translated_paragraph)
+
+    # 拼接段落，保留换行符
+    result = '\n'.join(translated_paragraphs)
+    print(f"最终结果: {result}")
+    return result
+
+def detect_and_translate(text: str, tone_style) -> str:
+    """
+    根据输入文本的内容选择适当的翻译函数：
+    1. 如果文本没有标点符号，使用 reverse_pinyin_translation。
+    2. 如果文本包含句号或特殊符号，使用 translate_with_punctuation。
+    3. 如果文本包含多段内容，使用 translate_paragraphs。
+    """
+    # 检查是否包含换行符（多段内容）
+    if '\n' in text.strip():
+        print("检测到多段内容，使用 translate_paragraphs")
+        return translate_paragraphs(text, tone_style)
+
+    # 检查是否包含标点符号
+    if re.search(r'[。！？!?.,]', text):
+        print("检测到标点符号，使用 translate_with_punctuation")
+        return translate_with_punctuation(text, tone_style)
+
+    # 默认处理：没有标点符号的文本
+    print("未检测到标点符号，使用 reverse_pinyin_translation")
+    return reverse_pinyin_translation(text, tone_style)
 
 # ---------- 与 docx 结合的示例流程 -------------
 def translate_docx(input_path: str, output_path: str, tone_style):
@@ -511,7 +559,7 @@ class TranslationApp:
                 return
             
             current_style = self.get_current_style()
-            translated = translate_with_punctuation(input_text, current_style)
+            translated = detect_and_translate(input_text, current_style)
             
             self.output_area.config(state='normal')
             self.output_area.delete("1.0", tk.END)
@@ -636,14 +684,14 @@ class TranslationApp:
 if __name__ == "__main__":
     # 单元测试
     test_cases = [
-        ("你好", TONE_STYLES[2], "Oahin"),                      # 无声调模式
-        ("测试", TONE_STYLES[0], "Ìhsèc"),                      # 带声调模式
-        ("你好,世界.", TONE_STYLES[2], "Eijihs,oahin."),        # 分词后带空格
-        ("空 格 处 理", TONE_STYLES[0], "Ǐl ùhc ég gnōk"),      # 空格处理
-        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")         # 保留声调
+        ("你好", TONE_STYLES[2], "Oahin"),                            # 无声调模式
+        ("测试", TONE_STYLES[0], "Ìhsèc"),                            # 带声调模式
+        ("你好,世界。", TONE_STYLES[2], "Eijihs, oahin。"),            # 分词后带空格
+        ("空 格 处 理", TONE_STYLES[0], "Ǐl ùhc ég gnōk"),             # 空格处理
+        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")                # 保留声调
     ]
     for text, style, expected in test_cases:
-        result = translate_with_punctuation(text, style)
+        result = detect_and_translate(text, style)
         assert result == expected, f"测试失败：{text} -> {result} (预期: {expected})"
     print("✅ 所有测试通过")
     
