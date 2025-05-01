@@ -155,8 +155,8 @@ def translate_paragraphs(text: str, tone_style) -> str:
 #print(f"翻译结果: {result1}")
 
 # 测试代码2
-essay = """第一段：你好,世界。今天是个好日子,阳光明媚。
+#essay = """第一段：你好,世界。今天是个好日子,阳光明媚。
 
-第二段：我们一起去公园散步,享受美好时光。生活如此美好,值得珍惜。"""
-result = translate_paragraphs(essay, TONE_STYLES[2])
-print(f"翻译结果:\n{result}")
+#第二段：我们一起去公园散步,享受美好时光。生活如此美好,值得珍惜。"""
+# result = translate_paragraphs(essay, TONE_STYLES[2])
+# print(f"翻译结果:\n{result}")
