@@ -10,6 +10,7 @@ required_packages = {
     "pyperclip": "pyperclip",
     "pydub": "pydub",
     "playsound": "playsound",
+    "python-docx": "python-docx",
 }
 
 def is_installed(module_name):

@@ -40,6 +40,7 @@ __email__ = "@gmail.com"
 
 5. 文件处理：
    - pdfplumber: PDF文件内容提取
+   - docx: Word文件内容提取
 
 6. 字符处理：
    - unicodedata: Unicode字符规范化处理
@@ -61,10 +62,13 @@ import json
 import jieba
 from threading import Thread
 import pdfplumber
+import docx
+import re
+from docx import Document
 import unicodedata
 from datetime import datetime
 import pyttsx3
-from pydub import AudioSegment  # 音频处理库
+from pydub import AudioSegment
 from pydub.playback import play
 import io
 import threading
@@ -93,7 +97,8 @@ TEMP_AUDIO = os.path.join(HISTORY_DIR, "temp_audio.wav")  # 临时音频文件�
 # print(HISTORY_FILE) 测试
 MAX_HISTORY = 20
 FILE_TYPES = [
-    ('PDF 文档', '*.pdf'), 
+    ('PDF 文档', '*.pdf'),
+    ('Word 文档', '*.docx'),
     ('文本文档', '*.txt'),
     ('所有文件', '*.*')
 ]
@@ -122,82 +127,277 @@ TONE_STYLES = [
 ]
 
 def clean_pinyin(pinyin_str, style):
-    """根据模式清洗拼音（修改空格处理）"""
+    """严格处理不同拼音风格"""
     if style.pypinyin_style == Style.NORMAL:
+        # 无声调模式：移除所有声调相关字符
         cleaned = []
         for char in pinyin_str:
-            # 保留空格
             if char == ' ':
                 cleaned.append(char)
                 continue
-            # 处理声调符号
             normalized = unicodedata.normalize('NFD', char)
             for c in normalized:
                 if not unicodedata.combining(c):
                     cleaned.append(c)
         return ''.join(cleaned).lower().replace("ü", "v")
-    else:
-        return pinyin_str
+    
+    elif style.pypinyin_style == Style.TONE2:
+        # 数字声调模式：保留数字但标准化格式
+        return re.sub(r'([a-zü]+)([1-4])', r'\1\2 ', pinyin_str.lower()).strip().replace("ü", "v")
+    
+    else:  # Style.TONE
+        # 保留原始声调符号
+        return pinyin_str.replace("ü", "v")
 
 def reverse_pinyin_translation(chinese_text, tone_style):
-    """核心翻译函数"""
-    try:
-        # ==== Check Custom Dictionary ====
-        if chinese_text in CUSTOM_TRANSLATION_DICT:
-            return CUSTOM_TRANSLATION_DICT[chinese_text]
+    # 如果在自定义字典里，直接返回
+    if chinese_text in CUSTOM_TRANSLATION_DICT:
+        return CUSTOM_TRANSLATION_DICT[chinese_text]
 
-        # ==== 新增分词逻辑 ====
-        words = jieba.lcut(chinese_text)
-        pinyin_parts = []
+    # 精确模式断句，避免重叠片段
+    words = jieba.cut(chinese_text, cut_all=False)
+
+    # 先按词得到拼音串
+    pinyin_parts = []
+    for word in words:
+        if word in CUSTOM_TRANSLATION_DICT:
+            pinyin_parts.append(CUSTOM_TRANSLATION_DICT[word])
+        else:
+            chars_pinyin = pinyin(word, style=tone_style.pypinyin_style)
+            combined = ''.join([syllable[0] for syllable in chars_pinyin])
+            pinyin_parts.append(combined)
+    pinyin_str = ' '.join(pinyin_parts)
+
+    # 清洗拼音（去声调符号或保留数字声调）
+    processed = clean_pinyin(pinyin_str, tone_style)
+
+    # 先整体反转词序，再对每个词内部字符倒放
+    rev_parts = [seg[::-1] for seg in processed.split()[::-1]]
+    out = ' '.join(rev_parts)            # e.g. "eijihs oahin"
+
+    # 整体首字母大写
+    return out[0].upper() + out[1:] if out else ""
+    
+def wtranslate_with_punctuation(text: str, tone_style) -> str:
+    _PUNCT_RE = re.compile(r'([，。！？；："＂＇＇＇""''‘’"“”()（）【】\{\}\[\]〈〉《》﹏…—,.!?;:\-\s])')
+    """
+    分阶段处理：
+    1. 中文→拼音（保持词序）
+    2. 反转每个词的拼音字母
+    3. 反转句子顺序+首字母大写
+    """
+    # 阶段一：中文→拼音（保持词序）
+    def to_pinyin(s: str) -> str:
+        words = list(jieba.cut(s))
+        pinyin_words = []
         for word in words:
-            # Check each word in the custom dictionary
-            if word in CUSTOM_TRANSLATION_DICT:
-                pinyin_parts.append(CUSTOM_TRANSLATION_DICT[word])
+            if _PUNCT_RE.fullmatch(word):  # 标点符号原样保留
+                pinyin_words.append(word)
             else:
-                chars_pinyin = pinyin(word, style=tone_style.pypinyin_style)
-                combined = ''.join([p[0] for p in chars_pinyin])
-                pinyin_parts.append(combined)
-        pinyin_str = ' '.join(pinyin_parts)
+                pys = pinyin(word, style=tone_style.pypinyin_style)
+                pinyin_words.append(''.join([p[0] for p in pys]))
+        return ' '.join(pinyin_words)  # 保留空格
 
-        # =========根据模式清洗==========
-        processed = clean_pinyin(pinyin_str, tone_style)
+    # 阶段二：反转拼音字母
+    def reverse_pinyin(s: str) -> str:
+        segments = _PUNCT_RE.split(s)
+        result = []
+        for seg in segments:
+            if not seg:
+                continue
+            if _PUNCT_RE.fullmatch(seg):  # 标点符号原样保留
+                result.append(seg)
+            else:
+                result.append(seg[::-1])  # 反转字母
+        return ''.join(result)
 
-        # =========反转==========
-        reversed_str = processed[::-1]
-        formatted = reversed_str[0].upper() + reversed_str[1:] if reversed_str else ""
-        return formatted
+    # 阶段三：反转句子顺序+首字母大写
+    sentences = re.split(r'([，。！？；,.!?])', text)  # 按标点符号分割
+    processed = []
+    current = []
+    
+    for seg in sentences:
+        if not seg.strip():
+            continue
+        if re.fullmatch(r'[，。！？；,.!?]', seg):  # 标点符号
+            if current:
+                content = ''.join(current)
+                # 阶段一和阶段二处理
+                pinyin_content = to_pinyin(content)
+                reversed_content = reverse_pinyin(pinyin_content)
+                processed.append((reversed_content, seg))
+                current = []
+        else:
+            current.append(seg)
+    
+    if current:
+        content = ''.join(current)
+        pinyin_content = to_pinyin(content)
+        reversed_content = reverse_pinyin(pinyin_content)
+        processed.append((reversed_content, ''))
 
-    except Exception as e:
-        raise ValueError(f"转换错误: {str(e)}")
+    # 反转句子顺序
+    reversed_sentences = processed[::-1]
+    
+    # 首字母大写
+    if reversed_sentences:
+        first_content, first_punct = reversed_sentences[0]
+        if first_content:
+            for i, c in enumerate(first_content):
+                if c.isalpha():
+                    first_content = first_content[:i] + c.upper() + first_content[i+1:]
+                    break
+        reversed_sentences[0] = (first_content, first_punct)
+    
+    return ''.join([content + punct for content, punct in reversed_sentences])
+
+def translate_with_punctuation(text: str, tone_style) -> str:
+    """
+    严格按照要求的新实现：
+    1. 先提取句子框架（保留原标点）
+    2. 每句内部分词并反转拼音
+    3. 反转句子顺序
+    4. 添加空格并首字母大写
+    """
+    # 第一步：提取句子框架（句子和标点符号分离）
+    sentences = []
+    delimiters = []
+    
+    # 用正则匹配中文标点分割
+    pattern = re.compile(r'([，。！？；,.!?])')
+    parts = pattern.split(text)
+    
+    current_sent = []
+    for part in parts:
+        if not part.strip():
+            continue
+        if pattern.fullmatch(part):  # 是标点符号
+            if current_sent:
+                sentences.append(''.join(current_sent))
+                current_sent = []
+            delimiters.append(part)
+        else:  # 是句子内容
+            current_sent.append(part)
+    
+    if current_sent:
+        sentences.append(''.join(current_sent))
+    
+    # 第二步：处理每个句子（分词→拼音→反转）
+    reversed_sents = []
+    for sent in sentences:
+        words = list(jieba.cut(sent))
+        reversed_words = []
+        for word in words:
+            # 中文转拼音
+            pys = pinyin(word, style=tone_style.pypinyin_style)
+            py_str = ''.join([p[0] for p in pys])
+            # 清洗拼音
+            cleaned = clean_pinyin(py_str, tone_style)
+            # 反转拼音
+            reversed_word = cleaned[::-1]
+            reversed_words.append(reversed_word)
+        reversed_sents.append(' '.join(reversed_words))  # 词间加空格
+    
+    # 第三步：反转句子顺序并组合
+    reversed_sents = reversed_sents[::-1]
+    final_parts = []
+    for i, sent in enumerate(reversed_sents):
+        final_parts.append(sent)
+        if i < len(delimiters):
+            final_parts.append(delimiters[len(delimiters) - i - 1])  # 反转标点符号顺序
+    
+    # 第四步：首字母大写
+    result = ''.join(final_parts).strip()
+    if result:
+        for i, c in enumerate(result):
+            if c.isalpha():
+                result = result[:i] + c.upper() + result[i+1:]
+                break
+    
+    return result
+
+# ---------- 与 docx 结合的示例流程 -------------
+def translate_docx(input_path: str, output_path: str, tone_style):
+    doc = Document(input_path)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for para in doc.paragraphs:
+            if not para.text.strip():
+                f.write("\n")  # 保留空行
+            else:
+                translated = translate_with_punctuation(para.text, tone_style)
+                f.write(translated + "\n")  # 确保换行
 
 def read_pdf(file_path):
-    """读取PDF文件内容,没有测试过"""
+    """读取 PDF 文件内容"""
     content = []
-    with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                content.extend(text.split('\n'))
-    return [line.strip() for line in content if line.strip()]
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    content.extend(text.split('\n'))
+        return [line.strip() for line in content if line.strip()]
+    except Exception as e:
+        raise ValueError(f"无法读取 PDF 文件: {str(e)}")
+
+def read_word(file_path):
+    """读取 Word 文件内容"""
+    content = []
+    try:
+        doc = docx.Document(file_path)
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                content.append(paragraph.text.strip())
+        return content
+    except Exception as e:
+        raise ValueError(f"无法读取 Word 文件: {str(e)}")
 
 def load_custom_dict(file_path="custom_dict.json"):
-    """加载自定义翻译字典"""
+    """加载自定义翻译字典并更新 jieba 词典"""
     try:
         if os.path.exists(file_path):
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                custom_dict = json.load(f)
+                # 将自定义词条添加到 jieba 词典
+                for word in custom_dict.keys():
+                    jieba.add_word(word)
+                return custom_dict
         else:
             return {}
     except Exception as e:
         print(f"加载自定义字典失败: {str(e)}")
         return {}
-    
+
 CUSTOM_TRANSLATION_DICT = load_custom_dict()
+
+def split_long_text(text, max_length=50):
+    """将长文本按标点符号或固定长度分段"""
+    import re
+    sentences = re.split(r'(。|！|\!|\.|？|\?)', text)  # 按标点符号分割
+    segments = []
+    current_segment = ""
+    for sentence in sentences:
+        if len(current_segment) + len(sentence) <= max_length:
+            current_segment += sentence
+        else:
+            segments.append(current_segment)
+            current_segment = sentence
+    if current_segment:
+        segments.append(current_segment)
+
+    # 如果没有标点符号，按固定长度分段
+    if not segments:
+        for i in range(0, len(text), max_length):
+            segments.append(text[i:i + max_length])
+
+    return segments
+
 def process_file_translation(tone_style):
     """文件翻译处理"""
     try:
         file_path = filedialog.askopenfilename(filetypes=FILE_TYPES)
-        if not file_path: return
+        if not file_path:
+            return
 
         progress_window = tk.Toplevel()
         progress_label = ttk.Label(progress_window, text="正在处理文件...")
@@ -205,27 +405,40 @@ def process_file_translation(tone_style):
         progress_window.grab_set()
 
         # 读取文件内容
+        content = []
         if file_path.endswith('.pdf'):
             content = read_pdf(file_path)
+        elif file_path.endswith('.docx'):
+            content = read_word(file_path)
         else:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            import chardet
+            with open(file_path, 'rb') as f:
+                raw_data = f.read()
+                detected = chardet.detect(raw_data)
+                encoding = detected['encoding'] if detected['encoding'] else 'utf-8'
+            with open(file_path, 'r', encoding=encoding) as f:
                 content = f.read().split('\n')
 
         # 翻译处理
         translated = []
         for para in content:
             if para.strip():
-                translated.append(reverse_pinyin_translation(para, tone_style))
+                # 分段处理长句子
+                segments = split_long_text(para)
+                for segment in segments:
+                    translated.append(reverse_pinyin_translation(segment, tone_style))
 
         # 保存结果
         save_path = filedialog.asksaveasfilename(
             defaultextension=".txt",
-            filetypes=FILE_TYPES
+            filetypes=[('文本文档', '*.txt')]
         )
-        if save_path:
-            with open(save_path, 'w', encoding='utf-8') as f:
-                f.write('\n\n'.join(translated))
-            messagebox.showinfo("完成", f"文件已保存至：\n{save_path}")
+        if not save_path:  # 用户取消保存操作
+            return
+
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write('\n\n'.join(translated))
+        messagebox.showinfo("完成", f"文件已保存至：\n{save_path}")
 
     except Exception as e:
         messagebox.showerror("错误", f"文件处理失败：{str(e)}")
@@ -371,7 +584,7 @@ class TranslationApp:
                 return
             
             current_style = self.get_current_style()
-            translated = reverse_pinyin_translation(input_text, current_style)
+            translated = translate_with_punctuation(input_text, current_style)
             
             self.output_area.config(state='normal')
             self.output_area.delete("1.0", tk.END)
@@ -493,18 +706,17 @@ class TranslationApp:
 
         threading.Thread(target=_speak_thread, daemon=True).start()
 
-
 if __name__ == "__main__":
     # 单元测试
     test_cases = [
-        ("你好", TONE_STYLES[2], "Oahin"),  # 无声调模式
-        ("测试", TONE_STYLES[0], "Ìhsèc"),  # 带声调模式
-        ("你好世界", TONE_STYLES[2], "Eijihs oahin"),     # 分词后带空格
-        ("北京大学", TONE_STYLES[1], "2eux4adgn1iji3eb"), # 有点问题，没办法保留空格
-        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")   # 保留声调
+        ("你好", TONE_STYLES[2], "Oahin"),                      # 无声调模式
+        ("测试", TONE_STYLES[0], "Ìhsèc"),                      # 带声调模式
+        ("你好,世界.", TONE_STYLES[2], "Eijihs,oahin."),        # 分词后带空格
+        ("空 格 处 理", TONE_STYLES[0], "Ǐl ùhc ég gnōk"),      # 空格处理
+        ("我爱编程", TONE_STYLES[0], "Gnéhcnāib ià ǒw")         # 保留声调
     ]
     for text, style, expected in test_cases:
-        result = reverse_pinyin_translation(text, style)
+        result = translate_with_punctuation(text, style)
         assert result == expected, f"测试失败：{text} -> {result} (预期: {expected})"
     print("✅ 所有测试通过")
     
