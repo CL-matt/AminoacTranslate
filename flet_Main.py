@@ -2,7 +2,6 @@ import os
 import sys
 import threading
 import time
-import wave
 import tkinter as tk
 from tkinter import filedialog
 
@@ -21,113 +20,67 @@ from core.file_io import process_file
 from core.history import HistoryRecord, load_history, save_history
 from core.translate import TONE_STYLES, detect_and_translate
 
-
 def main(page: ft.Page):
+    # ==========================
+    # 窗口与谷歌极简主题设置
+    # ==========================
     page.title = "Aminoac Translate"
-    page.window.width = 1100      
+    page.window.width = 1200      
     page.window.height = 850
     page.window.resizable = True
-    page.window.maximizable = True
-    page.padding = 20
+    page.padding = 40
+    page.bgcolor = "#F1F3F4" # 谷歌经典的浅灰背景
     page.theme_mode = ft.ThemeMode.LIGHT
-    page.scroll = ft.ScrollMode.AUTO
-    page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
     style_map = {style.name: style for style in TONE_STYLES}
     style_names = [style.name for style in TONE_STYLES]
     history_records = load_history()
 
     # ==========================
-    # 1. UI 控件定义区
+    # 1. 无边框输入/输出区域定义
     # ==========================
-    tone_dropdown = ft.Dropdown(
-        label="音调风格",
-        value=style_names[0],
-        options=[ft.dropdown.Option(name) for name in style_names],
-        width=220,
-    )
     input_field = ft.TextField(
-        label="输入文本",
         multiline=True,
-        min_lines=10,
-        max_lines=16,
+        min_lines=12,
+        max_lines=18,
         expand=True,
         autofocus=True,
-        border_radius=12,
-        filled=True,
-        hint_text="请输入中文或 Aminoac 内容",
+        border=ft.InputBorder.NONE, # 隐藏默认边框
+        filled=False,               # 隐藏默认灰色填充
+        hint_text="输入文字或选择文档",
+        text_size=20,               # 谷歌翻译标志性的大字体
     )
+    
     output_field = ft.TextField(
-        label="翻译结果",
         multiline=True,
-        min_lines=10,
-        max_lines=16,
+        min_lines=12,
+        max_lines=18,
         expand=True,
         read_only=True,
-        border_radius=12,
-        filled=True,
-        hint_text="翻译结果会显示在这里",
+        border=ft.InputBorder.NONE,
+        filled=False,
+        hint_text="翻译结果",
+        text_size=20,
+        color="#1A73E8", # 谷歌蓝字体（译文颜色）
     )
-    status_text = ft.Text(value="")
-    selected_file_text = ft.Text(value="未选择文件")
-    
-    # 历史记录视图
-    history_view = ft.ListView(expand=1, spacing=8, padding=0, auto_scroll=True)
-    MAX_VISIBLE_HISTORY = 6
+
+    # 顶部语言选择下拉框（仿谷歌语言栏）
+    tone_dropdown = ft.Dropdown(
+        value=style_names[0],
+        options=[ft.dropdown.Option(name) for name in style_names],
+        width=150,
+        border=ft.InputBorder.NONE,
+        text_size=16,
+        color="#1A73E8",
+        weight=ft.FontWeight.W_500,
+    )
+
+    status_text = ft.Text(value="", size=13, color="#5F6368")
+    selected_file_text = ft.Text(value="", size=13, color="#1A73E8")
 
     # ==========================
-    # 2. 历史记录管理功能
-    # ==========================
-    def refresh_history():
-        history_view.controls.clear()
-        visible_history = history_records[:MAX_VISIBLE_HISTORY]
-        
-        if not visible_history:
-            history_view.controls.append(ft.Text("暂无历史记录"))
-        else:
-            for record in visible_history:
-                input_preview = (record.input or "").replace("\n", " ")[:24]
-                output_preview = (record.output or "").replace("\n", " ")[:24]
-                
-                expanded = ft.Column([], spacing=4)
-                expanded.controls.append(ft.Text(record.timestamp, size=11, color="#616161"))
-                expanded.controls.append(ft.Text(f"输入：{record.input}", size=12, weight=ft.FontWeight.BOLD, selectable=True))
-                expanded.controls.append(ft.Text(f"结果：{record.output}", size=12, selectable=True))
-                expanded.controls.append(ft.Text(f"风格：{record.style}", size=11, color="#607D8B"))
-
-                collapsed = ft.Column(
-                    [
-                        ft.Text(record.timestamp, size=11, color="#616161"),
-                        ft.Text(input_preview, size=12, weight=ft.FontWeight.BOLD),
-                        ft.Text(output_preview, size=12),
-                        ft.Text(f"风格：{record.style}", size=11, color="#607D8B"),
-                    ],
-                    tight=True,
-                    spacing=1,
-                )
-
-                card_content = ft.Column([collapsed], tight=True, spacing=0)
-
-                def toggle_card(e, content=card_content, expanded_view=expanded, collapsed_view=collapsed):
-                    if content.controls[0] is collapsed_view:
-                        content.controls = [expanded_view]
-                    else:
-                        content.controls = [collapsed_view]
-                    page.update()
-
-                card = ft.Container(
-                    ft.Column([collapsed], tight=True, spacing=0),
-                    border=ft.Border.all(1, "#E0E0E0"),
-                    border_radius=8,
-                    padding=8, 
-                    on_click=lambda e, content=card_content: toggle_card(e, content=content),
-                )
-                card_content = card
-                history_view.controls.append(card)
-        page.update()
-
-    # ==========================
-    # 3. 翻译核心逻辑
+    # 2. 翻译与辅助功能逻辑
     # ==========================
     def apply_translation(source_text: str):
         tone_style = style_map[tone_dropdown.value or style_names[0]]
@@ -145,10 +98,12 @@ def main(page: ft.Page):
     def translate_click(e):
         source_text = (input_field.value or "").strip()
         if not source_text:
-            status_text.value = "请输入要翻译的内容。"
+            status_text.value = "请输入要翻译的内容"
             page.update()
             return
         try:
+            status_text.value = "正在翻译..."
+            page.update()
             apply_translation(source_text)
             status_text.value = "翻译完成"
         except Exception as exc: 
@@ -160,6 +115,7 @@ def main(page: ft.Page):
         input_field.value = ""
         output_field.value = ""
         status_text.value = ""
+        selected_file_text.value = ""
         page.update()
 
     def copy_click(e):
@@ -168,41 +124,31 @@ def main(page: ft.Page):
             status_text.value = "已复制到剪贴板"
             page.update()
 
-    # ==========================
-    # 4. 文件读写系统 (降维打击：原生同步弹窗)
-    # ==========================
-    pending_save_text = ""
-
     def translate_file_click(e):
-        # 召唤隐藏的底层弹窗
         root = tk.Tk()
-        root.withdraw() # 隐藏丑陋的主窗口
-        root.attributes('-topmost', True) # 强制显示在屏幕最前面
+        root.withdraw()
+        root.attributes('-topmost', True)
         
         file_path = filedialog.askopenfilename(
             title="选择要翻译的文件",
             filetypes=[("支持的文档", "*.pdf;*.docx;*.txt"), ("所有文件", "*.*")]
         )
-        root.destroy() # 选完立刻销毁
+        root.destroy()
 
         if not file_path:
-            return  # 用户取消了选择
+            return
         
-        selected_file_text.value = f"已选择：{os.path.basename(file_path)}"
+        selected_file_text.value = f"📄 {os.path.basename(file_path)}"
         tone_style = style_map[tone_dropdown.value or style_names[0]]
         
         try:
             status_text.value = "正在翻译文档，请稍候..."
             page.update()
-            
             translated_lines = process_file(file_path, tone_style)
-            
-            nonlocal pending_save_text
-            pending_save_text = "\n".join(translated_lines)
-            output_field.value = pending_save_text
+            output_field.value = "\n".join(translated_lines)
             status_text.value = "文档翻译已完成"
             
-            history_records.insert(0, HistoryRecord(os.path.basename(file_path), pending_save_text[:80], tone_style))
+            history_records.insert(0, HistoryRecord(os.path.basename(file_path), output_field.value[:80], tone_style))
             if len(history_records) > 20:
                 history_records[:] = history_records[:20]
             save_history(history_records)
@@ -218,7 +164,6 @@ def main(page: ft.Page):
             page.update()
             return
             
-        # 召唤隐藏的底层保存弹窗
         root = tk.Tk()
         root.withdraw()
         root.attributes('-topmost', True)
@@ -237,23 +182,16 @@ def main(page: ft.Page):
         try:
             with open(save_path, "w", encoding="utf-8") as handle:
                 handle.write(output_field.value)
-            
-            nonlocal pending_save_text
-            pending_save_text = output_field.value
             status_text.value = f"结果已保存到：{os.path.basename(save_path)}"
         except Exception as exc:
             status_text.value = f"保存失败：{exc}"
         page.update()
 
-    # ==========================
-    # 5. 语音合成模块 (多线程)
-    # ==========================
     def speak_click(e):
         if not (output_field.value or input_field.value):
             status_text.value = "没有可朗读的内容"
             page.update()
             return
-
         text_to_speak = output_field.value or input_field.value
 
         def _speak_thread():
@@ -275,13 +213,11 @@ def main(page: ft.Page):
                     audio = AudioSegment.from_wav(temp_audio)
                     reversed_audio = audio.reverse()
                     played = False
-                    
                     try:
                         play(reversed_audio)
                         played = True
-                    except Exception as play_error:
-                        print(f"pydub play failed: {play_error}")
-                        
+                    except Exception:
+                        pass
                     if not played:
                         try:
                             import winsound
@@ -302,63 +238,158 @@ def main(page: ft.Page):
         page.update()
         threading.Thread(target=_speak_thread, daemon=True).start()
 
-    # 初始化调用一次，加载默认数据
+    # ==========================
+    # 3. 历史记录面板 (极简样式)
+    # ==========================
+    history_view = ft.ListView(expand=1, spacing=8, padding=0, auto_scroll=True)
+    MAX_VISIBLE_HISTORY = 6
+
+    def refresh_history():
+        history_view.controls.clear()
+        visible_history = history_records[:MAX_VISIBLE_HISTORY]
+        
+        if not visible_history:
+            history_view.controls.append(ft.Text("暂无翻译历史", color="#5F6368", text_align=ft.TextAlign.CENTER))
+        else:
+            for record in visible_history:
+                input_preview = (record.input or "").replace("\n", " ")[:30] + "..."
+                output_preview = (record.output or "").replace("\n", " ")[:30] + "..."
+                
+                card = ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row([
+                                ft.Text(record.timestamp, size=11, color="#9AA0A6"),
+                                ft.Text(f"· {record.style}", size=11, color="#1A73E8"),
+                            ]),
+                            ft.Text(input_preview, size=14, color="#3C4043"),
+                            ft.Text(output_preview, size=14, color="#5F6368"),
+                        ],
+                        spacing=4,
+                    ),
+                    padding=16,
+                    border=ft.Border.all(1, "#DADCE0"),
+                    border_radius=8,
+                    bgcolor="#FFFFFF",
+                )
+                history_view.controls.append(card)
+        page.update()
+    
     refresh_history()
 
     # ==========================
-    # 6. 主页面布局拼装
+    # 4. 谷歌翻译布局拼装 (左右分栏白底卡片)
     # ==========================
-    page.add(
-        ft.Container(
-            ft.Column(
-                [
-                    ft.Text("Aminoac Translate", size=30, weight=ft.FontWeight.BOLD),
-                    ft.Text("V2.2 ", size=13, color="#616161"),
-                    
-                    # 顶部操作栏
-                    ft.Row(
-                        [
-                            tone_dropdown,
-                            ft.ElevatedButton("翻译文本", icon="translate", on_click=translate_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                            ft.ElevatedButton("翻译文档", icon="file_open", on_click=translate_file_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                            ft.ElevatedButton("保存结果", icon="save", on_click=save_translated_file_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                            ft.ElevatedButton("复制结果", icon="copy", on_click=copy_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                            ft.ElevatedButton("朗读", icon="volume_up", on_click=speak_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                            ft.TextButton("清空", icon="clear", on_click=clear_click, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))),
-                        ],
-                        spacing=10,
-                        wrap=True,
-                    ),
+    
+    # 左侧：源语言区
+    source_container = ft.Container(
+        expand=True,
+        padding=16,
+        content=ft.Column(
+            [
+                # 顶部栏：检测到的语言
+                ft.Row([
+                    ft.Text("中文 / Aminoac", size=16, weight=ft.FontWeight.W_500, color="#1A73E8"),
                     selected_file_text,
-                    
-                    # 左右双栏输入输出
-                    ft.Row(
-                        [
-                            ft.Container(input_field, expand=True, padding=5),
-                            ft.Container(output_field, expand=True, padding=5),
-                        ],
-                        expand=True,
-                        spacing=16,
-                    ),
-                    status_text,
-                    ft.Divider(),
-                    
-                    # 底部历史记录
-                    ft.Text("历史记录", size=18, weight=ft.FontWeight.BOLD),
-                    ft.Container(
-                        history_view, 
-                        height=270, 
-                        border=ft.Border.all(1, "#E0E0E0"),
-                        border_radius=12, 
-                        padding=8
-                    ),
-                ],
-                spacing=12,
-                expand=True,
-            ),
-            bgcolor="#F8FAFC",
-            border_radius=16,
-            padding=20,
+                ]),
+                ft.Divider(height=1, color="#E8EAED"),
+                # 主输入区
+                ft.Container(input_field, expand=True),
+                # 底部工具栏
+                ft.Row(
+                    [
+                        ft.IconButton(icon="file_upload", icon_color="#5F6368", tooltip="翻译文档", on_click=translate_file_click),
+                        ft.IconButton(icon="clear", icon_color="#5F6368", tooltip="清空", on_click=clear_click),
+                        ft.Container(expand=True), # 弹簧占位符
+                        ft.Text(value="5000 / 5000", size=12, color="#9AA0A6"), # 模拟字符计数器
+                        ft.ElevatedButton(
+                            "翻译", 
+                            bgcolor="#1A73E8", 
+                            color="#FFFFFF", 
+                            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=4)),
+                            on_click=translate_click,
+                            height=40,
+                            width=100
+                        )
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                )
+            ],
+            spacing=8
+        )
+    )
+
+    # 右侧：目标语言区
+    target_container = ft.Container(
+        expand=True,
+        padding=16,
+        content=ft.Column(
+            [
+                # 顶部栏：目标风格选择
+                ft.Row([tone_dropdown]),
+                ft.Divider(height=1, color="#E8EAED"),
+                # 主输出区
+                ft.Container(output_field, expand=True),
+                # 底部工具栏
+                ft.Row(
+                    [
+                        ft.IconButton(icon="copy", icon_color="#5F6368", tooltip="复制", on_click=copy_click),
+                        ft.IconButton(icon="volume_up", icon_color="#5F6368", tooltip="朗读译文", on_click=speak_click),
+                        ft.IconButton(icon="save_alt", icon_color="#5F6368", tooltip="保存结果", on_click=save_translated_file_click),
+                        ft.Container(expand=True),
+                        status_text,
+                    ],
+                    alignment=ft.MainAxisAlignment.START,
+                )
+            ],
+            spacing=8
+        )
+    )
+
+    # 中间的整体卡片（带边框和阴影，白底）
+    translation_card = ft.Container(
+        content=ft.Row(
+            [
+                source_container,
+                ft.VerticalDivider(width=1, color="#DADCE0"), # 左右分割线
+                target_container,
+            ],
+            spacing=0,
+            expand=True,
+        ),
+        bgcolor="#FFFFFF",
+        border_radius=12,
+        border=ft.Border.all(1, "#DADCE0"),
+        height=400, # 限制输入框区域高度
+    )
+
+    # 整个页面组合
+    page.add(
+        ft.Column(
+            [
+                # App Header
+                ft.Row(
+                    [
+                        ft.Icon("translate", color="#5F6368", size=30),
+                        ft.Text("Aminoac 翻译", size=24, color="#5F6368", weight=ft.FontWeight.NORMAL),
+                    ],
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+                ft.Container(height=10), # 间距
+                
+                # 核心翻译区域
+                translation_card,
+                
+                ft.Container(height=20),
+                
+                # 历史记录区域
+                ft.Text("历史记录", size=16, color="#3C4043", weight=ft.FontWeight.W_500),
+                ft.Container(
+                    content=history_view,
+                    height=250, # 历史记录区高度
+                ),
+            ],
+            width=1000, # 控制最大宽度，使界面居中更美观
             expand=True,
         )
     )

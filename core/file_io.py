@@ -7,7 +7,7 @@ import docx
 import json
 import pdfplumber
 from docx import Document
-from .translation_core import translate_with_punctuation
+from .translation import translate_with_punctuation
 
 def read_pdf(file_path):
     """读取 PDF 文件内容"""
