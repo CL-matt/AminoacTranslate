@@ -73,7 +73,7 @@ def main(page: ft.Page):
         border=ft.InputBorder.NONE,
         text_size=16,
         color="#1A73E8",
-        weight=ft.FontWeight.W_500,
+        text_style=ft.TextStyle(weight=ft.FontWeight.W_500),
     )
 
     status_text = ft.Text(value="", size=13, color="#5F6368")
